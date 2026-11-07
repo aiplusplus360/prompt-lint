@@ -49,15 +49,16 @@ def cmd_lint(args: argparse.Namespace) -> int:
         return EXIT_ERROR
 
     enabled = list(rules.RULE_IDS)
-    if args.disable:
-        unknown = [rule for rule in args.disable if rule not in rules.RULE_IDS]
+    disabled = [rule for group in (args.disable or []) for rule in group]
+    if disabled:
+        unknown = [rule for rule in disabled if rule not in rules.RULE_IDS]
         if unknown:
             print(
                 f"error: unknown rule(s) {unknown}; known: {list(rules.RULE_IDS)}",
                 file=sys.stderr,
             )
             return EXIT_ERROR
-        enabled = [rule for rule in enabled if rule not in args.disable]
+        enabled = [rule for rule in enabled if rule not in disabled]
 
     try:
         report = lint_path(path, enabled)
@@ -101,8 +102,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("path", nargs="?", default=".", help="file or directory")
     parser.add_argument("--fail-on", choices=(HIGH, MEDIUM, LOW), default=HIGH,
                         help="exit 1 at this severity or above")
-    parser.add_argument("--disable", nargs="+", metavar="RULE", default=[],
-                        help="rule id(s) to skip")
+    parser.add_argument(
+        "--disable",
+        action="append",
+        nargs="+",
+        metavar="RULE",
+        default=None,
+        help="rule id(s) to skip; accepts both '--disable a b' and repeated flags",
+    )
     parser.add_argument("--json", action="store_true", help="machine readable")
     parser.add_argument("--excerpt", action="store_true", help="show the matching line")
     parser.add_argument("--quiet", action="store_true", help="no report, exit code only")

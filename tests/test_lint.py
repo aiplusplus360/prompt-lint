@@ -327,6 +327,28 @@ class TestCli(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("unknown rule", err)
 
+    def test_disable_accepts_both_repeated_and_grouped_flags(self):
+        # The bug this locks down: `--disable a --disable b` used to keep only
+        # the last flag, because nargs="+" with a store action overwrites.
+        grouped = self._run([
+            str(EXAMPLES / "bad_prompts.py"),
+            "--fail-on", "high",
+            "--disable",
+            "untrusted-interpolation", "contradictory-length",
+            "json-without-schema", "duplicated-instruction",
+        ])
+        repeated = self._run([
+            str(EXAMPLES / "bad_prompts.py"),
+            "--fail-on", "high",
+            "--disable", "untrusted-interpolation",
+            "--disable", "contradictory-length",
+            "--disable", "json-without-schema",
+            "--disable", "duplicated-instruction",
+        ])
+        self.assertEqual(grouped[0], 0)
+        self.assertEqual(repeated[0], 0, repeated[1])
+        self.assertNotIn("untrusted-interpolation", repeated[1])
+
     def test_disable_silences_a_rule(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "p.txt"
