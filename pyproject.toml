@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prompt-lint"
+version = "0.1.0"
+description = "Static analysis for prompts: find injection surface and instructions a model cannot follow."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "aiplusplus360" }]
+keywords = ["prompt-engineering", "prompt-injection", "static-analysis", "lint", "llm", "security"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+promptlint = "promptlint.cli:main"
+
+[tool.setuptools]
+packages = ["promptlint"]

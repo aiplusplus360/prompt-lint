@@ -1,0 +1,143 @@
+﻿name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install
+        run: python -m pip install --upgrade pip && python -m pip install -e .
+
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Bad prompts are caught
+        run: |
+          set +e
+          promptlint examples/bad_prompts.py --json > report.json
+          code=$?
+          set -e
+          test "$code" -eq 1
+          python - <<'PY'
+          import json
+          data = json.load(open("report.json"))
+          rules = {f["rule"] for f in data["findings"]}
+          expected = {
+              "untrusted-interpolation",
+              "contradictory-length",
+              "json-without-schema",
+              "duplicated-instruction",
+          }
+          missing = expected - rules
+          assert not missing, f"rules stopped firing: {missing}"
+          assert data["findings"][0]["severity"] == "high", data["findings"][0]
+          print("caught:", sorted(rules))
+          PY
+
+      - name: Good prompts stay silent
+        run: |
+          promptlint examples/good_prompts.py
+          echo "no false positives on the correct version"
+
+      - name: User text in a tag is not an injection
+        run: |
+          python - <<'PY'
+          from promptlint import blocks_from_python, lint_blocks
+
+          safe = (
+              'def f(user_question):\n'
+              '    return f"You are a support agent. Always answer. <data>{user_question}</data>"\n'
+          )
+          risky = (
+              'def f(user_question):\n'
+              '    return f"You are a support agent. Always answer. {user_question}"\n'
+          )
+          assert lint_blocks(blocks_from_python(safe, "a.py")).findings == []
+          found = lint_blocks(blocks_from_python(risky, "b.py")).findings
+          assert [f.rule for f in found] == ["untrusted-interpolation"], found
+          print("tag boundary distinguishes the two")
+          PY
+
+      - name: An opening tag without a closing tag is not a boundary
+        run: |
+          python - <<'PY'
+          from promptlint import blocks_from_python, lint_blocks
+
+          source = (
+              'def f(user_question):\n'
+              '    return f"You are a support agent. Always answer. <b>{user_question}"\n'
+          )
+          found = lint_blocks(blocks_from_python(source, "a.py")).findings
+          assert any(f.rule == "untrusted-interpolation" for f in found), found
+          print("unclosed tag is still an injection surface")
+          PY
+
+      - name: Format templates are resolved through module constants
+        run: |
+          python - <<'PY'
+          from promptlint import blocks_from_python
+
+          source = (
+              'TEMPLATE = "You are a support agent. Always answer. Context: {context}"\n'
+              'def build(user_input):\n'
+              '    return TEMPLATE.format(context=user_input)\n'
+          )
+          blocks = [b for b in blocks_from_python(source, "a.py") if b.interpolations]
+          assert blocks, "PROMPT.format(...) was not resolved"
+          assert blocks[0].interpolations == ("context",), blocks[0]
+          print("resolved:", blocks[0].interpolations)
+          PY
+
+      - name: Broken Python is reported, not raised
+        run: |
+          printf 'def broken(:\n' > broken.py
+          set +e
+          promptlint broken.py
+          code=$?
+          set -e
+          rm broken.py
+          test "$code" -eq 2
+          echo "unparseable file exits 2"
+
+      - name: --fail-on controls the gate
+        run: |
+          set +e
+          promptlint examples/good_prompts.py --fail-on medium
+          clean=$?
+          promptlint examples/bad_prompts.py --fail-on medium --quiet
+          strict=$?
+          set -e
+          test "$clean" -eq 0
+          test "$strict" -eq 1
+          echo "threshold works"
+
+      - name: A rule can be disabled by id
+        run: |
+          set +e
+          promptlint examples/bad_prompts.py --disable untrusted-interpolation \
+            --disable contradictory-length --disable json-without-schema \
+            --disable duplicated-instruction --fail-on high --quiet
+          code=$?
+          set -e
+          test "$code" -eq 0
+          echo "disabling by id works"
+
